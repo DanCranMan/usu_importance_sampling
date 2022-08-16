@@ -26,9 +26,13 @@ public class MultiTargetModelGenerator extends MGen{
     public boolean absorb = false;
     @Option(name="--simple", usage="generate only target paths")
     public boolean simple = false;
+    @Option(name="--acyclic", aliases="-c",
+	usage="Influences model generation so that the graph is acyclic")
+	public boolean acyclic = false;
     // end CLI Arguments
     //////////////////////////////////////////////////
 
+   
 
     //Set default file name
     @Override
@@ -49,8 +53,12 @@ public class MultiTargetModelGenerator extends MGen{
         case "absorb" : 
             absorb = true;
             return true;
+        case "acyclic" :
+            acyclic = true;
+            return true;
         default : return false;
       }
+
     }
 
     //Set default options
@@ -121,6 +129,9 @@ public class MultiTargetModelGenerator extends MGen{
          * The method is to start at the target states and randomly generate predecessor states.
          * A check is done to ensure that the predecessor is not already on the path and is not a target state.
          * Predecessors are tracked using the TargetPath class.
+         * 
+         * The acyclic option makes it so that states of a higher value cannot connect to a lower valued state.
+         * To help with making connections, acyclic number keeps track of the largest number a connection can connect to.
         */
         logger.debug("-------------Generating target path(s)-------------");
         targetPathTracker = new TargetPath[targets.size()];
@@ -128,23 +139,38 @@ public class MultiTargetModelGenerator extends MGen{
         int initial = 0;
         for(int targetIdx = 0; targetIdx < targets.size(); targetIdx++){
             int currentTarget = targets.get(targetIdx);
+            
             logger.trace("Starting path for "+ currentTarget);
             targetPathTracker[targetIdx] = new TargetPath(currentTarget);
             logger.trace("Setting targetPathCheck["+currentTarget+"] to true");
             targetPathCheck[currentTarget] = true;
             int current = currentTarget;
+            int acyclicNumberOfStates;
             for(int count = 1; current != initial; count++){
-                int predecessor = (int)(Math.random()*numberOfStates);
+                int predecessor;
+                acyclicNumberOfStates = current;
+                if(acyclic){
+                predecessor = (int)(Math.random()*acyclicNumberOfStates);
+                }else{
+                predecessor = (int)(Math.random()*numberOfStates);
+                }
                 //if absorb is selected guarantee one state is not on target path
                 if(absorb && count==numberOfStates-2){
                     logger.debug("-------------Forcing to initial-------------");
                     predecessor = initial;
                 }
                 //Check if predecessor is valid, redraw if not
-                while(targets.contains(predecessor) || current == predecessor || targetPathTracker[targetIdx].onPath(predecessor)){
-                    logger.trace(predecessor + " is an invalid predecessor. Redrawing");
-                    predecessor = (int)(Math.random()*numberOfStates);
-                }
+                if(acyclic){
+					while(targets.contains(predecessor) || current <= predecessor || targetPathTracker[targetIdx].onPath(predecessor)){
+						logger.trace(predecessor + " is an invalid predecessor. Redrawing");
+						predecessor = (int)(Math.random()*acyclicNumberOfStates);
+					}
+				}else{
+					while(targets.contains(predecessor) || current == predecessor || targetPathTracker[targetIdx].onPath(predecessor)){
+						logger.trace(predecessor + " is an invalid predecessor. Redrawing");
+						predecessor = (int)(Math.random()*numberOfStates);
+					}
+				}
                 int rate = (int)transitionRateDistribution.random(); 
                 TransitionPath transition = new TransitionPath(
                     predecessor, 
@@ -201,23 +227,33 @@ public class MultiTargetModelGenerator extends MGen{
             logger.debug("-------------Adding all states to a target path-------------");
             for(int stateId : notOnPath){
                 int predecessor = targetPathTracker[(int)(targets.size()*Math.random())].getRandom();
-                while(targets.contains(predecessor)){
-                    logger.trace(predecessor + " is not a valid predecessor. Redrawing");
-                    predecessor = targetPathTracker[(int)(targets.size()*Math.random())].getRandom();
-                }
-                int successor = absorb?absorbingState:targetPathTracker[(int)(targets.size()*Math.random())].getRandom();
-                //Create successor transition and add if it does not already exist
-                int rate = (int)transitionRateDistribution.random();
-                TransitionPath successorTransition = new TransitionPath(
-                    stateId, 
-                    successor, 
-                    rate);
-                if(!stateSpace[stateId].transitionOutExists(successorTransition)){
-                    logger.trace("Connecting state " +stateId+ " to state "+ successor);
-                    stateSpace[stateId].transitionsOut.add(successorTransition);
-                    stateSpace[successor].transitionsIn.add(successorTransition);
-                } else {
-                    logger.trace(stateId+" already connects to "+ successor);
+                if(acyclic){
+                    while((targets.contains(predecessor)) && (predecessor >= stateId)){
+                        logger.trace(predecessor + " is not a valid predecessor. Redrawing");
+                        predecessor = targetPathTracker[(int)(targets.size()*Math.random())].getRandom();
+                    }
+                }else{
+                    while(targets.contains(predecessor)){
+                        logger.trace(predecessor + " is not a valid predecessor. Redrawing");
+                        predecessor = targetPathTracker[(int)(targets.size()*Math.random())].getRandom();
+                    }
+                } 
+                int rate;
+                if(!acyclic){
+                    int successor = absorb?absorbingState:targetPathTracker[(int)(targets.size()*Math.random())].getRandom();
+                    //Create successor transition and add if it does not already exist
+                    rate = (int)transitionRateDistribution.random();
+                    TransitionPath successorTransition = new TransitionPath(
+                        stateId, 
+                        successor, 
+                        rate);
+                    if(!stateSpace[stateId].transitionOutExists(successorTransition)){
+                        logger.trace("Connecting state " +stateId+ " to state "+ successor + " stateId to successor");
+                        stateSpace[stateId].transitionsOut.add(successorTransition);
+                        stateSpace[successor].transitionsIn.add(successorTransition);
+                    } else {
+                        logger.trace(stateId+" already connects to "+ successor);
+                    }
                 }
                 //Create predecessor transition and add if it does not already exist
                 rate = (int)transitionRateDistribution.random(); 
@@ -226,7 +262,7 @@ public class MultiTargetModelGenerator extends MGen{
                     stateId,
                     rate);
                 if(!stateSpace[stateId].transitionInExists(predTransition)){
-                    logger.trace("Connecting state " +predecessor+ " to state "+ stateId);
+                    logger.trace("Connecting state " +predecessor+ " to state "+ stateId + " predecessor to stateId");
                     stateSpace[predecessor].transitionsOut.add(predTransition);
                     stateSpace[stateId].transitionsIn.add(predTransition);
                 } else {
@@ -243,7 +279,7 @@ public class MultiTargetModelGenerator extends MGen{
          * transition already exists with a different rate then that transition is skipped. If it is a simple model 
          * then this section is skipped.
          */
-        if(!simple){
+        if(!simple && !acyclic){
             logger.debug("-------------Randomly generating other transitions-------------");
             for(State state : stateSpace){
                 int numberOfTransitions =(int)transitionCountDistribution.random();

@@ -3,6 +3,12 @@ package imsam.mgen;
 
 public class AcyclicModelGenerator extends MGen {
 
+    public static final String MGEN_ID = "acyclic";
+
+    @Override
+    public String getMGenID() {
+        return MGEN_ID;
+    }
     
     @Override
     protected void generateModel() {
