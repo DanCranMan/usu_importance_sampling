@@ -49,16 +49,20 @@ public class MultiTargetModelGenerator extends MGen{
             return true;
         case "simple" :
             simple = true;
-            return true;
+            break;
         case "absorb" : 
             absorb = true;
-            return true;
+            break;
         case "acyclic" :
             acyclic = true;
             return true;
         default : return false;
       }
-
+        if(key == "acyclic"){
+            acyclic = true;
+        }
+    
+        return true;
     }
 
     //Set default options
@@ -228,7 +232,8 @@ public class MultiTargetModelGenerator extends MGen{
             for(int stateId : notOnPath){
                 int predecessor = targetPathTracker[(int)(targets.size()*Math.random())].getRandom();
                 if(acyclic){
-                    while((targets.contains(predecessor)) && (predecessor >= stateId)){
+
+                    while((targets.contains(predecessor)) || (predecessor >= stateId)){
                         logger.trace(predecessor + " is not a valid predecessor. Redrawing");
                         predecessor = targetPathTracker[(int)(targets.size()*Math.random())].getRandom();
                     }
